@@ -1,7 +1,7 @@
 use clap::Parser;
+use log::{error, info};
 use std::path::PathBuf;
 use std::time::Instant;
-use log::{info, error};
 
 #[derive(Parser)]
 #[command(author, version, about)]

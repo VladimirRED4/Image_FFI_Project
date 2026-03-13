@@ -1,17 +1,17 @@
 pub mod error;
 pub mod plugin_loader;
 
-use std::fs;
-use std::path::Path;
-use std::time::Instant;
-use std::thread;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::io::{self, Write};
-use image::{ImageFormat, RgbaImage};
 use crate::error::ProcessorError;
 use crate::plugin_loader::Plugin;
-use log::{info, debug, error};
+use image::{ImageFormat, RgbaImage};
+use log::{debug, error, info};
+use std::fs;
+use std::io::{self, Write};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Instant;
 
 pub fn process_image(
     input_path: &Path,
@@ -31,7 +31,9 @@ pub fn process_image(
     }
     if !params_path.exists() {
         error!("Params file not found: {}", params_path.display());
-        return Err(ProcessorError::ParamsFileNotFound(params_path.to_path_buf()));
+        return Err(ProcessorError::ParamsFileNotFound(
+            params_path.to_path_buf(),
+        ));
     }
 
     // Загрузка изображения
@@ -120,7 +122,7 @@ pub fn process_image(
         None => {
             error!("Failed to create image from processed data");
             return Err(ProcessorError::ImageSaveError(
-                "Failed to create image from raw data".to_string()
+                "Failed to create image from raw data".to_string(),
             ));
         }
     };

@@ -1,7 +1,7 @@
-use libloading::{Library, Symbol};
-use std::path::Path;
 use crate::error::ProcessorError;
-use log::{info, debug, error};
+use libloading::{Library, Symbol};
+use log::{debug, error, info};
+use std::path::Path;
 
 pub type ProcessImageFunc = unsafe extern "C" fn(
     width: u32,
@@ -20,7 +20,11 @@ impl Plugin {
         // Определяем имя библиотеки
         let lib_name = format!(
             "{}{}",
-            if cfg!(target_os = "windows") { "" } else { "lib" },
+            if cfg!(target_os = "windows") {
+                ""
+            } else {
+                "lib"
+            },
             plugin_name
         ) + match std::env::consts::OS {
             "linux" => ".so",
@@ -35,7 +39,7 @@ impl Plugin {
         if !lib_path.exists() {
             error!("Plugin not found: {}", lib_path.display());
             return Err(ProcessorError::PluginNotFound(
-                lib_path.to_string_lossy().to_string()
+                lib_path.to_string_lossy().to_string(),
             ));
         }
 
