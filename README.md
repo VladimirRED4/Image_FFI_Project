@@ -1,6 +1,6 @@
 # Image FFI Project with Plugins
 
-![CI](https://github.com/VladimirRED4/Image_FFI_Project/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/VladimirRED4/Image_FFI_Project/actions/workflows/ci.yml/badge.svg?branch=master)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)
 
