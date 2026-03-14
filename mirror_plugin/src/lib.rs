@@ -10,7 +10,6 @@ struct MirrorParams {
     vertical: bool,
 }
 
-
 /// Применяет зеркальное отражение к изображению.
 ///
 /// # Safety
