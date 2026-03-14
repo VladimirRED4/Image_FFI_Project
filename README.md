@@ -64,7 +64,7 @@ cargo build --workspace --release
 echo '{"horizontal":true,"vertical":false}' > mirror_params.json
 
 # Запустить обработку
-./target/release/image_processor.exe input.png output.png mirror_plugin mirror_params.json
+./target/release/image_processor.exe test_input.png output.png mirror_plugin mirror_params.json
 ```
 
 - **Размытие изображения**
@@ -74,7 +74,7 @@ echo '{"horizontal":true,"vertical":false}' > mirror_params.json
 echo '{"radius":5,"iterations":2}' > blur_params.json
 
 # Запустить обработку
-./target/release/image_processor.exe input.png output.png blur_plugin blur_params.json
+./target/release/image_processor.exe test_input.png output.png blur_plugin blur_params.json
 ```
 
 ## 🎯 Плагины

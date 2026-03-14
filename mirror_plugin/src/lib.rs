@@ -26,20 +26,83 @@ pub unsafe extern "C" fn process_image(
     rgba_data: *mut u8,
     params: *const c_char,
 ) {
+    // Проверяем параметры на корректность
+    if width == 0 || height == 0 {
+        eprintln!("Warning: zero width or height");
+        return;
+    }
+
+    // Проверяем, что указатель не нулевой
+    if rgba_data.is_null() {
+        eprintln!("Error: rgba_data is null");
+        return;
+    }
+
+    // Проверяем переполнение при вычислении размера буфера
+    let w = match usize::try_from(width) {
+        Ok(w) => w,
+        Err(_) => {
+            eprintln!("Error: width too large for target platform");
+            return;
+        }
+    };
+
+    let h = match usize::try_from(height) {
+        Ok(h) => h,
+        Err(_) => {
+            eprintln!("Error: height too large for target platform");
+            return;
+        }
+    };
+
+    // Используем checked_mul для предотвращения переполнения
+    let total_pixels = match w.checked_mul(h) {
+        Some(p) => p,
+        None => {
+            eprintln!("Error: width * height overflow");
+            return;
+        }
+    };
+
+    let buffer_size = match total_pixels.checked_mul(4) {
+        Some(size) => size,
+        None => {
+            eprintln!("Error: buffer size overflow");
+            return;
+        }
+    };
+
+    // Дополнительная проверка: буфер не должен быть слишком большим
+    // (например, больше 1 ГБ для тестов)
+    if buffer_size > 1024 * 1024 * 1024 {
+        eprintln!("Warning: buffer size too large ({} bytes)", buffer_size);
+        return;
+    }
+
     let params_str = if params.is_null() {
         ""
     } else {
         // Safety: вызывающий гарантирует, что params - валидная C-строка
-        CStr::from_ptr(params).to_str().unwrap_or("")
+        match CStr::from_ptr(params).to_str() {
+            Ok(s) => s,
+            Err(_) => {
+                eprintln!("Error: invalid UTF-8 in params");
+                return;
+            }
+        }
     };
 
-    let mirror_params: MirrorParams = serde_json::from_str(params_str).unwrap_or_default();
-
-    let w = width as usize;
-    let h = height as usize;
+    let mirror_params: MirrorParams = match serde_json::from_str(params_str) {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("Warning: failed to parse params, using defaults");
+            MirrorParams::default()
+        }
+    };
 
     // Safety: вызывающий гарантирует, что rgba_data указывает на память нужного размера
-    let data = std::slice::from_raw_parts_mut(rgba_data, w * h * 4);
+    // и что размер соответствует вычисленному buffer_size
+    let data = std::slice::from_raw_parts_mut(rgba_data, buffer_size);
 
     if mirror_params.horizontal {
         mirror_horizontal(data, w, h);
@@ -53,8 +116,21 @@ pub unsafe extern "C" fn process_image(
 fn mirror_horizontal(data: &mut [u8], width: usize, height: usize) {
     for y in 0..height {
         for x in 0..width / 2 {
-            let left_idx = (y * width + x) * 4;
-            let right_idx = (y * width + (width - 1 - x)) * 4;
+            // Проверяем индексы на переполнение
+            let left_idx = match (y * width + x).checked_mul(4) {
+                Some(idx) => idx,
+                None => continue,
+            };
+
+            let right_idx = match (y * width + (width - 1 - x)).checked_mul(4) {
+                Some(idx) => idx,
+                None => continue,
+            };
+
+            // Проверяем, что индексы в пределах буфера
+            if left_idx + 3 >= data.len() || right_idx + 3 >= data.len() {
+                continue;
+            }
 
             for i in 0..4 {
                 data.swap(left_idx + i, right_idx + i);
@@ -66,8 +142,19 @@ fn mirror_horizontal(data: &mut [u8], width: usize, height: usize) {
 fn mirror_vertical(data: &mut [u8], width: usize, height: usize) {
     for y in 0..height / 2 {
         for x in 0..width {
-            let top_idx = (y * width + x) * 4;
-            let bottom_idx = ((height - 1 - y) * width + x) * 4;
+            let top_idx = match (y * width + x).checked_mul(4) {
+                Some(idx) => idx,
+                None => continue,
+            };
+
+            let bottom_idx = match ((height - 1 - y) * width + x).checked_mul(4) {
+                Some(idx) => idx,
+                None => continue,
+            };
+
+            if top_idx + 3 >= data.len() || bottom_idx + 3 >= data.len() {
+                continue;
+            }
 
             for i in 0..4 {
                 data.swap(top_idx + i, bottom_idx + i);
@@ -85,9 +172,9 @@ mod tests {
     fn test_mirror_horizontal() {
         let width: u32 = 5;
         let height: u32 = 3;
-        let mut data = vec![0u8; (width * height * 4) as usize];
+        let buffer_size = (width * height * 4) as usize;
+        let mut data = vec![0u8; buffer_size];
 
-        // Заполняем данные: каждому пикселю даем уникальное значение по его x-координате
         for y in 0..height as usize {
             for x in 0..width as usize {
                 let idx = (y * width as usize + x) * 4;
@@ -104,17 +191,11 @@ mod tests {
             process_image(width, height, data.as_mut_ptr(), params.as_ptr());
         }
 
-        // Проверяем результат
         for y in 0..height as usize {
             for x in 0..width as usize {
                 let idx = (y * width as usize + x) * 4;
                 let expected_x = (width as usize - 1 - x) as u8;
-
-                assert_eq!(
-                    data[idx], expected_x,
-                    "Pixel at ({}, {}) should have value {}, but has {}",
-                    x, y, expected_x, data[idx]
-                );
+                assert_eq!(data[idx], expected_x);
             }
         }
     }
@@ -123,9 +204,9 @@ mod tests {
     fn test_mirror_vertical() {
         let width: u32 = 3;
         let height: u32 = 5;
-        let mut data = vec![0u8; (width * height * 4) as usize];
+        let buffer_size = (width * height * 4) as usize;
+        let mut data = vec![0u8; buffer_size];
 
-        // Заполняем данные: каждому пикселю даем уникальное значение по его y-координате
         for y in 0..height as usize {
             for x in 0..width as usize {
                 let idx = (y * width as usize + x) * 4;
@@ -142,17 +223,11 @@ mod tests {
             process_image(width, height, data.as_mut_ptr(), params.as_ptr());
         }
 
-        // Проверяем результат
         for y in 0..height as usize {
             for x in 0..width as usize {
                 let idx = (y * width as usize + x) * 4;
                 let expected_y = (height as usize - 1 - y) as u8;
-
-                assert_eq!(
-                    data[idx], expected_y,
-                    "Pixel at ({}, {}) should have value {}, but has {}",
-                    x, y, expected_y, data[idx]
-                );
+                assert_eq!(data[idx], expected_y);
             }
         }
     }
@@ -161,10 +236,10 @@ mod tests {
     fn test_mirror_both() {
         let width: u32 = 3;
         let height: u32 = 3;
-        let mut data = vec![0u8; (width * height * 4) as usize];
-        let mut expected = vec![0u8; (width * height * 4) as usize];
+        let buffer_size = (width * height * 4) as usize;
+        let mut data = vec![0u8; buffer_size];
+        let mut expected = vec![0u8; buffer_size];
 
-        // Заполняем данные уникальными значениями
         for y in 0..height as usize {
             for x in 0..width as usize {
                 let idx = (y * width as usize + x) * 4;
@@ -191,11 +266,7 @@ mod tests {
         }
 
         for i in 0..data.len() {
-            assert_eq!(
-                data[i], expected[i],
-                "Double mirror should produce diagonal flip at index {}",
-                i
-            );
+            assert_eq!(data[i], expected[i]);
         }
     }
 
@@ -203,9 +274,9 @@ mod tests {
     fn test_mirror_twice() {
         let width: u32 = 4;
         let height: u32 = 4;
-        let mut data = vec![0u8; (width * height * 4) as usize];
+        let buffer_size = (width * height * 4) as usize;
+        let mut data = vec![0u8; buffer_size];
 
-        // Заполняем данные уникальными значениями
         for y in 0..height as usize {
             for x in 0..width as usize {
                 let idx = (y * width as usize + x) * 4;
@@ -220,19 +291,104 @@ mod tests {
         let original = data.clone();
         let params = CString::new("{\"horizontal\":true,\"vertical\":true}").unwrap();
 
-        // Применяем двойное отражение дважды
         unsafe {
             process_image(width, height, data.as_mut_ptr(), params.as_ptr());
             process_image(width, height, data.as_mut_ptr(), params.as_ptr());
         }
 
-        // После двух применений должно вернуться к исходному
         for i in 0..data.len() {
-            assert_eq!(
-                data[i], original[i],
-                "Double mirror twice should return to original at index {}",
-                i
-            );
+            assert_eq!(data[i], original[i]);
+        }
+    }
+
+    #[test]
+    fn test_zero_dimensions() {
+        let mut data = vec![0u8; 4];
+        let params = CString::new("{\"horizontal\":true}").unwrap();
+
+        unsafe {
+            process_image(0, 10, data.as_mut_ptr(), params.as_ptr());
+            process_image(10, 0, data.as_mut_ptr(), params.as_ptr());
+            process_image(0, 0, data.as_mut_ptr(), params.as_ptr());
+        }
+    }
+
+    #[test]
+    fn test_null_data_pointer() {
+        let params = CString::new("{\"horizontal\":true}").unwrap();
+
+        unsafe {
+            process_image(10, 10, std::ptr::null_mut(), params.as_ptr());
+        }
+    }
+
+    #[test]
+    fn test_small_buffer() {
+        let width: u32 = 1;
+        let height: u32 = 1;
+        let buffer_size = (width * height * 4) as usize;
+        let mut data = vec![100u8; buffer_size];
+        let params = CString::new("{\"horizontal\":true}").unwrap();
+
+        unsafe {
+            process_image(width, height, data.as_mut_ptr(), params.as_ptr());
+            assert_eq!(data[0], 100);
+        }
+    }
+
+    #[test]
+    fn test_extreme_dimensions() {
+        // Создаем минимальный корректный буфер
+        let mut data = vec![0u8; 4];
+        let params = CString::new("{\"horizontal\":true}").unwrap();
+
+        unsafe {
+            // Эти вызовы должны вернуться на этапе проверки переполнения
+            // и не должны пытаться создать слайс
+            process_image(u32::MAX, 1, data.as_mut_ptr(), params.as_ptr());
+            process_image(1, u32::MAX, data.as_mut_ptr(), params.as_ptr());
+            process_image(100_000, 100_000, data.as_mut_ptr(), params.as_ptr());
+        }
+    }
+
+    #[test]
+    fn test_null_params() {
+        let width: u32 = 10;
+        let height: u32 = 10;
+        let buffer_size = (width * height * 4) as usize;
+        let mut data = vec![0u8; buffer_size];
+
+        unsafe {
+            process_image(width, height, data.as_mut_ptr(), std::ptr::null());
+        }
+    }
+
+    #[test]
+    fn test_invalid_utf8_params() {
+        let width: u32 = 10;
+        let height: u32 = 10;
+        let buffer_size = (width * height * 4) as usize;
+        let mut data = vec![0u8; buffer_size];
+
+        let invalid_utf8 = vec![0xFF, 0xFF, 0xFF, 0xFF];
+        let params = CString::new(invalid_utf8).unwrap();
+
+        unsafe {
+            process_image(width, height, data.as_mut_ptr(), params.as_ptr());
+        }
+    }
+
+    #[test]
+    fn test_invalid_json_params() {
+        let width: u32 = 10;
+        let height: u32 = 10;
+        let buffer_size = (width * height * 4) as usize;
+        let mut data = vec![0u8; buffer_size];
+
+        let params = CString::new("this is not json").unwrap();
+
+        unsafe {
+            process_image(width, height, data.as_mut_ptr(), params.as_ptr());
         }
     }
 }
